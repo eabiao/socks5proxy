@@ -66,7 +66,7 @@ const (
 
 // 握手
 func handShake(client net.Conn) error {
-	buff := make([]byte, 255)
+	buff := make([]byte, 256)
 
 	// read VER, NMETHODS
 	if _, err := io.ReadFull(client, buff[:2]); err != nil {
