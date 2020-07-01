@@ -4,8 +4,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -29,51 +27,85 @@ func main() {
 }
 
 // 处理请求
-func handleConnect(conn net.Conn) {
-	defer conn.Close()
-	conn.(*net.TCPConn).SetKeepAlive(true)
+func handleConnect(client net.Conn) {
+	defer client.Close()
+	client.(*net.TCPConn).SetKeepAlive(true)
 
-	addr, err := Handshake(conn)
+	req, err := parseRequest(client)
 	if err != nil {
 		return
 	}
 
-	addrStr := addr.String()
-	log.Println(addrStr)
+	log.Println(req.addr)
 
-	target, err := net.DialTimeout("tcp", addrStr, 2*time.Second)
+	target, err := net.DialTimeout("tcp", req.addr, 2*time.Second)
 	if err != nil {
 		return
 	}
 	defer target.Close()
 	target.(*net.TCPConn).SetKeepAlive(true)
 
-	relay(conn, target)
+	relay(client, target)
+}
 
-	//req, err := parseRequest(conn)
-	//if err != nil {
-	//	return
-	//}
-	//log.Println(req.host)
-	//
-	//if req.isHttps {
-	//	fmt.Fprint(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
-	//}
-	//
-	//target, err := net.DialTimeout("tcp", req.addr, 2*time.Second)
-	//if err != nil {
-	//	return
-	//}
-	//defer target.Close()
-	//
-	//if !req.isHttps {
-	//	_, err = target.Write(req.data)
-	//	if err != nil {
-	//		return
-	//	}
-	//}
-	//
-	//relay(req.conn, target)
+// http请求
+type HttpRequest struct {
+	isHttps bool
+	addr    string
+	data    []byte
+}
+
+const MaxAddrLen = 1 + 1 + 255 + 2
+
+// 解析请求
+func parseRequest(client net.Conn) (*HttpRequest, error) {
+
+	buf := make([]byte, MaxAddrLen)
+
+	if _, err := io.ReadFull(client, buf[:2]); err != nil {
+		return nil, err
+	}
+
+	nmethods := buf[1]
+	if _, err := io.ReadFull(client, buf[:nmethods]); err != nil {
+		return nil, err
+	}
+
+	if _, err := client.Write([]byte{5, 0}); err != nil {
+		return nil, err
+	}
+
+	if _, err := io.ReadFull(client, buf[:3]); err != nil {
+		return nil, err
+	}
+
+	if _, err := io.ReadFull(client, buf[:1]); err != nil {
+		return nil, err
+	}
+
+	var addrData []byte
+	addrType := buf[0]
+	if addrType == 3 {
+		if _, err := io.ReadFull(client, buf[1:2]); err != nil {
+			return nil, err
+		}
+		if _, err := io.ReadFull(client, buf[2:2+int(buf[1])+2]); err != nil {
+			return nil, err
+		}
+		addrData = buf[:1+1+int(buf[1])+2]
+	} else if addrType == 1 {
+		if _, err := io.ReadFull(client, buf[1:1+net.IPv4len+2]); err != nil {
+			return nil, err
+		}
+		addrData = buf[:1+net.IPv4len+2]
+	} else if addrType == 4 {
+		if _, err := io.ReadFull(r, b[1:1+net.IPv6len+2]); err != nil {
+			return nil, err
+		}
+		addrData = b[:1+net.IPv6len+2]
+	}
+
+	return nil, nil
 }
 
 // 数据传输
@@ -93,62 +125,4 @@ func relay(left, right net.Conn) (int64, int64) {
 	reqN := <-ch
 
 	return reqN, respN
-}
-
-// http请求
-type HttpRequest struct {
-	conn    net.Conn
-	addr    string
-	isHttps bool
-	data    []byte
-	host    string
-	port    int
-}
-
-// 解析请求
-func parseRequest(client net.Conn) (*HttpRequest, error) {
-
-	var buff = make([]byte, 1024)
-
-	readN, err := client.Read(buff[:])
-	if err != nil {
-		return nil, err
-	}
-	data := buff[:readN]
-
-	var isHttps bool
-	var addr string
-
-	for _, line := range strings.Split(string(data), "\r\n") {
-		if strings.HasPrefix(line, "CONNECT") {
-			isHttps = true
-			continue
-		}
-		if strings.HasPrefix(line, "Host:") {
-			addr = strings.Fields(line)[1]
-			break
-		}
-	}
-
-	if !strings.Contains(addr, ":") {
-		if isHttps {
-			addr = addr + ":443"
-		} else {
-			addr = addr + ":80"
-		}
-	}
-
-	addrParts := strings.SplitN(addr, ":", 2)
-	host := addrParts[0]
-	port, _ := strconv.Atoi(addrParts[1])
-
-	request := &HttpRequest{
-		conn:    client,
-		addr:    addr,
-		isHttps: isHttps,
-		data:    data,
-		host:    host,
-		port:    port,
-	}
-	return request, nil
 }
