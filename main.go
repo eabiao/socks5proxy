@@ -52,14 +52,14 @@ func handleConnect(client net.Conn) {
 // 解析请求
 func handShake(client net.Conn) (string, error) {
 
-	buf := make([]byte, 1+1+255+2)
+	buff := make([]byte, 1+1+255+2)
 
-	if _, err := io.ReadFull(client, buf[:2]); err != nil {
+	if _, err := io.ReadFull(client, buff[:2]); err != nil {
 		return "", err
 	}
 
-	nmethods := buf[1]
-	if _, err := io.ReadFull(client, buf[:nmethods]); err != nil {
+	nmethods := buff[1]
+	if _, err := io.ReadFull(client, buff[:nmethods]); err != nil {
 		return "", err
 	}
 
@@ -67,36 +67,36 @@ func handShake(client net.Conn) (string, error) {
 		return "", err
 	}
 
-	if _, err := io.ReadFull(client, buf[:3]); err != nil {
+	if _, err := io.ReadFull(client, buff[:3]); err != nil {
 		return "", err
 	}
 
-	if _, err := io.ReadFull(client, buf[:1]); err != nil {
+	if _, err := io.ReadFull(client, buff[:1]); err != nil {
 		return "", err
 	}
 
-	cmd := buf[1]
+	cmd := buff[1]
 
 	var addrData []byte
-	addrType := buf[0]
+	addrType := buff[0]
 	if addrType == 3 {
-		if _, err := io.ReadFull(client, buf[1:2]); err != nil {
+		if _, err := io.ReadFull(client, buff[1:2]); err != nil {
 			return "", err
 		}
-		if _, err := io.ReadFull(client, buf[2:2+int(buf[1])+2]); err != nil {
+		if _, err := io.ReadFull(client, buff[2:2+int(buff[1])+2]); err != nil {
 			return "", err
 		}
-		addrData = buf[:1+1+int(buf[1])+2]
+		addrData = buff[:1+1+int(buff[1])+2]
 	} else if addrType == 1 {
-		if _, err := io.ReadFull(client, buf[1:1+net.IPv4len+2]); err != nil {
+		if _, err := io.ReadFull(client, buff[1:1+net.IPv4len+2]); err != nil {
 			return "", err
 		}
-		addrData = buf[:1+net.IPv4len+2]
+		addrData = buff[:1+net.IPv4len+2]
 	} else if addrType == 4 {
-		if _, err := io.ReadFull(client, buf[1:1+net.IPv6len+2]); err != nil {
+		if _, err := io.ReadFull(client, buff[1:1+net.IPv6len+2]); err != nil {
 			return "", err
 		}
-		addrData = buf[:1+net.IPv6len+2]
+		addrData = buff[:1+net.IPv6len+2]
 	}
 
 	if cmd == 1 {
