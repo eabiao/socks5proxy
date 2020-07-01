@@ -57,6 +57,17 @@ const (
 	AtypIPv6       = 4
 )
 
+// 握手
+//func handShake(client net.Conn) (string, error) {
+
+//type HttpRequest struct {
+//	addr string
+//	data []byte
+//}
+
+// 解析请求
+//func parseRequest(client net.Conn) (*HttpRequest, error) {
+
 // 解析请求
 func handShake(client net.Conn) (string, error) {
 
@@ -85,8 +96,11 @@ func handShake(client net.Conn) (string, error) {
 	}
 
 	cmd := buff[1]
-	addrType := buff[3]
+	if cmd != CmdConnect {
+		return "", Error("command not support")
+	}
 
+	addrType := buff[3]
 	var addrData []byte
 
 	if addrType == AtypDomainName {
@@ -109,11 +123,7 @@ func handShake(client net.Conn) (string, error) {
 		addrData = buff[:1+net.IPv6len+2]
 	}
 
-	if cmd == CmdConnect {
-		client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
-	} else {
-		return "", Error("command not support")
-	}
+	client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
 
 	var host, port string
 
