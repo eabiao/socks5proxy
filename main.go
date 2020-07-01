@@ -92,10 +92,10 @@ type HttpRequest struct {
 
 // 解析请求
 func parseRequest(client net.Conn) (*HttpRequest, error) {
-	buff := make([]byte, 255)
+	buff := make([]byte, 256)
 
-	// read VER CMD RSV ATYP
-	if _, err := io.ReadFull(client, buff[:4]); err != nil {
+	// read VER CMD RSV
+	if _, err := io.ReadFull(client, buff[:3]); err != nil {
 		return nil, err
 	}
 
@@ -104,11 +104,16 @@ func parseRequest(client net.Conn) (*HttpRequest, error) {
 		return nil, Error(fmt.Sprint("command not support", cmd))
 	}
 
+	// read ATYP
+	if _, err := io.ReadFull(client, buff[:1]); err != nil {
+		return nil, err
+	}
+	addrType := buff[0]
+
 	var host string
 	var port int
 
 	// read host
-	addrType := buff[3]
 	if addrType == AtypDomainName {
 		if _, err := io.ReadFull(client, buff[:1]); err != nil {
 			return nil, err
