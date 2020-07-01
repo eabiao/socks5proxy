@@ -51,6 +51,7 @@ func handleConnect(client net.Conn) {
 	defer target.Close()
 	target.(*net.TCPConn).SetKeepAlive(true)
 
+	client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
 	relay(client, target)
 }
 
@@ -133,8 +134,6 @@ func parseRequest(client net.Conn) (*HttpRequest, error) {
 		return nil, err
 	}
 	port = (int(buff[0]) << 8) | int(buff[1])
-
-	client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
 
 	addr := host + ":" + strconv.Itoa(port)
 	request := &HttpRequest{
