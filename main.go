@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -32,14 +33,18 @@ func handleConnect(client net.Conn) {
 	defer client.Close()
 	client.(*net.TCPConn).SetKeepAlive(true)
 
-	addr, err := handShake(client)
+	err := handShake(client)
 	if err != nil {
 		return
 	}
 
-	log.Println(addr)
+	req, err := parseRequest(client)
+	if err != nil {
+		return
+	}
+	log.Println(req.addr)
 
-	target, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	target, err := net.DialTimeout("tcp", req.addr, 2*time.Second)
 	if err != nil {
 		return
 	}
@@ -58,94 +63,84 @@ const (
 )
 
 // 握手
-//func handShake(client net.Conn) (string, error) {
+func handShake(client net.Conn) error {
+	buff := make([]byte, 255)
 
-//type HttpRequest struct {
-//	addr string
-//	data []byte
-//}
-
-// 解析请求
-//func parseRequest(client net.Conn) (*HttpRequest, error) {
-
-// 解析请求
-func handShake(client net.Conn) (string, error) {
-
-	buff := make([]byte, 1+1+255+2)
-
-	// handshake
+	// read VER, NMETHODS
 	if _, err := io.ReadFull(client, buff[:2]); err != nil {
-		return "", err
+		return err
 	}
 	nmethods := buff[1]
 
+	// read METHODS
 	if _, err := io.ReadFull(client, buff[:nmethods]); err != nil {
-		return "", err
+		return err
 	}
 
+	// write VER METHOD
 	if _, err := client.Write([]byte{5, 0}); err != nil {
-		return "", err
+		return err
 	}
+	return nil
+}
 
-	// -----------------------
-	// read addr
+type HttpRequest struct {
+	addr string
+}
 
-	// VER CMD RSV ATYP
+// 解析请求
+func parseRequest(client net.Conn) (*HttpRequest, error) {
+	buff := make([]byte, 255)
+
+	// read VER CMD RSV ATYP
 	if _, err := io.ReadFull(client, buff[:4]); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	cmd := buff[1]
 	if cmd != CmdConnect {
-		return "", Error("command not support")
+		return nil, Error(fmt.Sprint("command not support", cmd))
 	}
 
+	var host string
+	var port int
+
+	// read host
 	addrType := buff[3]
-	var addrData []byte
-
 	if addrType == AtypDomainName {
-		if _, err := io.ReadFull(client, buff[1:2]); err != nil {
-			return "", err
+		if _, err := io.ReadFull(client, buff[:1]); err != nil {
+			return nil, err
 		}
-		if _, err := io.ReadFull(client, buff[2:2+int(buff[1])+2]); err != nil {
-			return "", err
+		domainLen := buff[0]
+		if _, err := io.ReadFull(client, buff[:domainLen]); err != nil {
+			return nil, err
 		}
-		addrData = buff[:1+1+int(buff[1])+2]
+		host = string(buff[:domainLen])
 	} else if addrType == AtypIPv4 {
-		if _, err := io.ReadFull(client, buff[1:1+net.IPv4len+2]); err != nil {
-			return "", err
+		if _, err := io.ReadFull(client, buff[:net.IPv4len]); err != nil {
+			return nil, err
 		}
-		addrData = buff[:1+net.IPv4len+2]
+		host = net.IP(buff[:net.IPv4len]).String()
 	} else if addrType == AtypIPv6 {
-		if _, err := io.ReadFull(client, buff[1:1+net.IPv6len+2]); err != nil {
-			return "", err
+		if _, err := io.ReadFull(client, buff[:net.IPv6len]); err != nil {
+			return nil, err
 		}
-		addrData = buff[:1+net.IPv6len+2]
+		host = net.IP(buff[:net.IPv6len]).String()
 	}
+
+	// read port
+	if _, err := io.ReadFull(client, buff[:2]); err != nil {
+		return nil, err
+	}
+	port = (int(buff[0]) << 8) | int(buff[1])
 
 	client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
 
-	var host, port string
-
-	if addrType == AtypDomainName {
-		host = string(addrData[2 : 2+int(addrData[1])])
-		port = strconv.Itoa((int(addrData[2+int(addrData[1])]) << 8) | int(addrData[2+int(addrData[1])+1]))
-	} else if addrType == AtypIPv4 {
-		host = net.IP(addrData[1 : 1+net.IPv4len]).String()
-		port = strconv.Itoa((int(addrData[1+net.IPv4len]) << 8) | int(addrData[1+net.IPv4len+1]))
-	} else if addrType == AtypIPv6 {
-		host = net.IP(addrData[1 : 1+net.IPv6len]).String()
-		port = strconv.Itoa((int(addrData[1+net.IPv6len]) << 8) | int(addrData[1+net.IPv6len+1]))
+	addr := host + ":" + strconv.Itoa(port)
+	request := &HttpRequest{
+		addr: addr,
 	}
-
-	addr := host + ":" + port
-	return addr, nil
-}
-
-type Error string
-
-func (e Error) Error() string {
-	return string(e)
+	return request, nil
 }
 
 // 数据传输
