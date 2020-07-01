@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
 	"time"
 )
 
@@ -31,14 +32,14 @@ func handleConnect(client net.Conn) {
 	defer client.Close()
 	client.(*net.TCPConn).SetKeepAlive(true)
 
-	req, err := parseRequest(client)
+	addr, err := handShake(client)
 	if err != nil {
 		return
 	}
 
-	log.Println(req.addr)
+	log.Println(addr)
 
-	target, err := net.DialTimeout("tcp", req.addr, 2*time.Second)
+	target, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
 		return
 	}
@@ -48,64 +49,83 @@ func handleConnect(client net.Conn) {
 	relay(client, target)
 }
 
-// http请求
-type HttpRequest struct {
-	isHttps bool
-	addr    string
-	data    []byte
-}
-
-const MaxAddrLen = 1 + 1 + 255 + 2
-
 // 解析请求
-func parseRequest(client net.Conn) (*HttpRequest, error) {
+func handShake(client net.Conn) (string, error) {
 
-	buf := make([]byte, MaxAddrLen)
+	buf := make([]byte, 1+1+255+2)
 
 	if _, err := io.ReadFull(client, buf[:2]); err != nil {
-		return nil, err
+		return "", err
 	}
 
 	nmethods := buf[1]
 	if _, err := io.ReadFull(client, buf[:nmethods]); err != nil {
-		return nil, err
+		return "", err
 	}
 
 	if _, err := client.Write([]byte{5, 0}); err != nil {
-		return nil, err
+		return "", err
 	}
 
 	if _, err := io.ReadFull(client, buf[:3]); err != nil {
-		return nil, err
+		return "", err
 	}
 
 	if _, err := io.ReadFull(client, buf[:1]); err != nil {
-		return nil, err
+		return "", err
 	}
+
+	cmd := buf[1]
 
 	var addrData []byte
 	addrType := buf[0]
 	if addrType == 3 {
 		if _, err := io.ReadFull(client, buf[1:2]); err != nil {
-			return nil, err
+			return "", err
 		}
 		if _, err := io.ReadFull(client, buf[2:2+int(buf[1])+2]); err != nil {
-			return nil, err
+			return "", err
 		}
 		addrData = buf[:1+1+int(buf[1])+2]
 	} else if addrType == 1 {
 		if _, err := io.ReadFull(client, buf[1:1+net.IPv4len+2]); err != nil {
-			return nil, err
+			return "", err
 		}
 		addrData = buf[:1+net.IPv4len+2]
 	} else if addrType == 4 {
-		if _, err := io.ReadFull(r, b[1:1+net.IPv6len+2]); err != nil {
-			return nil, err
+		if _, err := io.ReadFull(client, buf[1:1+net.IPv6len+2]); err != nil {
+			return "", err
 		}
-		addrData = b[:1+net.IPv6len+2]
+		addrData = buf[:1+net.IPv6len+2]
 	}
 
-	return nil, nil
+	if cmd == 1 {
+		client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
+	} else {
+		return "", Error("command not support")
+	}
+
+	var host, port string
+
+	if addrType == 3 {
+		host = string(addrData[2 : 2+int(addrData[1])])
+		port = strconv.Itoa((int(addrData[2+int(addrData[1])]) << 8) | int(addrData[2+int(addrData[1])+1]))
+	} else if addrType == 1 {
+		host = net.IP(addrData[1 : 1+net.IPv4len]).String()
+		port = strconv.Itoa((int(addrData[1+net.IPv4len]) << 8) | int(addrData[1+net.IPv4len+1]))
+	} else if addrType == 4 {
+		host = net.IP(addrData[1 : 1+net.IPv6len]).String()
+		port = strconv.Itoa((int(addrData[1+net.IPv6len]) << 8) | int(addrData[1+net.IPv6len+1]))
+	}
+
+	addr := host + ":" + port
+	return addr, nil
+}
+
+type Error string
+
+func (e Error) Error() string {
+	return string(e)
 }
 
 // 数据传输
