@@ -44,6 +44,8 @@ func handleConnect(client net.Conn) {
 	}
 	log.Println(req.addr)
 
+	client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
+
 	target, err := net.DialTimeout("tcp", req.addr, 2*time.Second)
 	if err != nil {
 		return
@@ -51,7 +53,6 @@ func handleConnect(client net.Conn) {
 	defer target.Close()
 	target.(*net.TCPConn).SetKeepAlive(true)
 
-	client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
 	relay(client, target)
 }
 
