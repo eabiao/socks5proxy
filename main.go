@@ -161,3 +161,9 @@ func relay(left, right net.Conn) (int64, int64) {
 
 	return reqN, respN
 }
+
+type Error string
+
+func (e Error) Error() string {
+	return string(e)
+}
