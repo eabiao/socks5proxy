@@ -49,16 +49,25 @@ func handleConnect(client net.Conn) {
 	relay(client, target)
 }
 
+const (
+	CmdConnect = 1
+
+	AtypIPv4       = 1
+	AtypDomainName = 3
+	AtypIPv6       = 4
+)
+
 // 解析请求
 func handShake(client net.Conn) (string, error) {
 
 	buff := make([]byte, 1+1+255+2)
 
+	// handshake
 	if _, err := io.ReadFull(client, buff[:2]); err != nil {
 		return "", err
 	}
-
 	nmethods := buff[1]
+
 	if _, err := io.ReadFull(client, buff[:nmethods]); err != nil {
 		return "", err
 	}
@@ -67,19 +76,20 @@ func handShake(client net.Conn) (string, error) {
 		return "", err
 	}
 
-	if _, err := io.ReadFull(client, buff[:3]); err != nil {
-		return "", err
-	}
+	// -----------------------
+	// read addr
 
-	if _, err := io.ReadFull(client, buff[:1]); err != nil {
+	// VER CMD RSV ATYP
+	if _, err := io.ReadFull(client, buff[:4]); err != nil {
 		return "", err
 	}
 
 	cmd := buff[1]
+	addrType := buff[3]
 
 	var addrData []byte
-	addrType := buff[0]
-	if addrType == 3 {
+
+	if addrType == AtypDomainName {
 		if _, err := io.ReadFull(client, buff[1:2]); err != nil {
 			return "", err
 		}
@@ -87,19 +97,19 @@ func handShake(client net.Conn) (string, error) {
 			return "", err
 		}
 		addrData = buff[:1+1+int(buff[1])+2]
-	} else if addrType == 1 {
+	} else if addrType == AtypIPv4 {
 		if _, err := io.ReadFull(client, buff[1:1+net.IPv4len+2]); err != nil {
 			return "", err
 		}
 		addrData = buff[:1+net.IPv4len+2]
-	} else if addrType == 4 {
+	} else if addrType == AtypIPv6 {
 		if _, err := io.ReadFull(client, buff[1:1+net.IPv6len+2]); err != nil {
 			return "", err
 		}
 		addrData = buff[:1+net.IPv6len+2]
 	}
 
-	if cmd == 1 {
+	if cmd == CmdConnect {
 		client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
 	} else {
 		return "", Error("command not support")
@@ -107,13 +117,13 @@ func handShake(client net.Conn) (string, error) {
 
 	var host, port string
 
-	if addrType == 3 {
+	if addrType == AtypDomainName {
 		host = string(addrData[2 : 2+int(addrData[1])])
 		port = strconv.Itoa((int(addrData[2+int(addrData[1])]) << 8) | int(addrData[2+int(addrData[1])+1]))
-	} else if addrType == 1 {
+	} else if addrType == AtypIPv4 {
 		host = net.IP(addrData[1 : 1+net.IPv4len]).String()
 		port = strconv.Itoa((int(addrData[1+net.IPv4len]) << 8) | int(addrData[1+net.IPv4len+1]))
-	} else if addrType == 4 {
+	} else if addrType == AtypIPv6 {
 		host = net.IP(addrData[1 : 1+net.IPv6len]).String()
 		port = strconv.Itoa((int(addrData[1+net.IPv6len]) << 8) | int(addrData[1+net.IPv6len+1]))
 	}
