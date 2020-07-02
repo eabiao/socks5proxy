@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -33,15 +32,14 @@ func handleConnect(client net.Conn) {
 	defer client.Close()
 	client.(*net.TCPConn).SetKeepAlive(true)
 
-	err := handShake(client)
-	if err != nil {
-		return
-	}
+	// 错误处理
+	defer catch()
 
-	req, err := parseRequest(client)
-	if err != nil {
-		return
-	}
+	// 握手
+	handShake(client)
+
+	// 解析请求
+	req := parseRequest(client)
 	log.Println(req.addr)
 
 	client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
@@ -62,28 +60,23 @@ const (
 	AtypIPv4       = 1
 	AtypDomainName = 3
 	AtypIPv6       = 4
+
+	ErrCommandNotSupport = Error("command not support")
 )
 
 // 握手
-func handShake(client net.Conn) error {
-	buff := make([]byte, 256)
+func handShake(client net.Conn) {
+	conn := newBuffConn(client, 256)
 
 	// read VER, NMETHODS
-	if _, err := io.ReadFull(client, buff[:2]); err != nil {
-		return err
-	}
+	buff := conn.readBytes(2)
 	nmethods := buff[1]
 
 	// read METHODS
-	if _, err := io.ReadFull(client, buff[:nmethods]); err != nil {
-		return err
-	}
+	conn.readBytes(int(nmethods))
 
 	// write VER METHOD
-	if _, err := client.Write([]byte{5, 0}); err != nil {
-		return err
-	}
-	return nil
+	conn.writeBytes([]byte{5, 0})
 }
 
 type HttpRequest struct {
@@ -91,23 +84,19 @@ type HttpRequest struct {
 }
 
 // 解析请求
-func parseRequest(client net.Conn) (*HttpRequest, error) {
-	buff := make([]byte, 256)
+func parseRequest(client net.Conn) *HttpRequest {
+	conn := newBuffConn(client, 256)
 
 	// read VER CMD RSV
-	if _, err := io.ReadFull(client, buff[:3]); err != nil {
-		return nil, err
-	}
+	buff := conn.readBytes(3)
 
 	cmd := buff[1]
 	if cmd != CmdConnect {
-		return nil, Error(fmt.Sprint("command not support", cmd))
+		panic(ErrCommandNotSupport)
 	}
 
 	// read ATYP
-	if _, err := io.ReadFull(client, buff[:1]); err != nil {
-		return nil, err
-	}
+	buff = conn.readBytes(1)
 	addrType := buff[0]
 
 	var host string
@@ -115,37 +104,24 @@ func parseRequest(client net.Conn) (*HttpRequest, error) {
 
 	// read host
 	if addrType == AtypDomainName {
-		if _, err := io.ReadFull(client, buff[:1]); err != nil {
-			return nil, err
-		}
+		buff = conn.readBytes(1)
 		domainLen := buff[0]
-		if _, err := io.ReadFull(client, buff[:domainLen]); err != nil {
-			return nil, err
-		}
+		buff = conn.readBytes(int(domainLen))
 		host = string(buff[:domainLen])
 	} else if addrType == AtypIPv4 {
-		if _, err := io.ReadFull(client, buff[:net.IPv4len]); err != nil {
-			return nil, err
-		}
+		buff = conn.readBytes(net.IPv4len)
 		host = net.IP(buff[:net.IPv4len]).String()
 	} else if addrType == AtypIPv6 {
-		if _, err := io.ReadFull(client, buff[:net.IPv6len]); err != nil {
-			return nil, err
-		}
+		buff = conn.readBytes(net.IPv6len)
 		host = net.IP(buff[:net.IPv6len]).String()
 	}
 
 	// read port
-	if _, err := io.ReadFull(client, buff[:2]); err != nil {
-		return nil, err
-	}
+	buff = conn.readBytes(2)
 	port = (int(buff[0]) << 8) | int(buff[1])
 
 	addr := host + ":" + strconv.Itoa(port)
-	request := &HttpRequest{
-		addr: addr,
-	}
-	return request, nil
+	return &HttpRequest{addr: addr}
 }
 
 // 数据传输
@@ -167,8 +143,47 @@ func relay(left, right net.Conn) (int64, int64) {
 	return reqN, respN
 }
 
+// 带缓存的连接
+type BuffConn struct {
+	conn net.Conn
+	buff []byte
+}
+
+func newBuffConn(conn net.Conn, buffSize int) *BuffConn {
+	return &BuffConn{
+		conn: conn,
+		buff: make([]byte, buffSize),
+	}
+}
+
+func (bc *BuffConn) readBytes(size int) []byte {
+	_, err := io.ReadFull(bc.conn, bc.buff[:size])
+	try(err)
+	return bc.buff[:size]
+}
+
+func (bc *BuffConn) writeBytes(data []byte) {
+	_, err := bc.conn.Write(data)
+	try(err)
+}
+
+// error
 type Error string
 
 func (e Error) Error() string {
 	return string(e)
+}
+
+// try
+func try(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+// catch
+func catch() {
+	if err := recover(); err != nil {
+		log.Println(err)
+	}
 }
